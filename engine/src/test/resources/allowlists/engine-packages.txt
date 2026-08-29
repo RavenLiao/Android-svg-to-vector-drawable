@@ -1,0 +1,4 @@
+com.android.ide.common.vectordrawable
+com.android.ide.common.util
+com.android.utils
+com.google.common

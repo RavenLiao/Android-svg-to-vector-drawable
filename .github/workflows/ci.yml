@@ -1,0 +1,159 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  discover:
+    name: discover-locked-candidate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - id: build-java
+        uses: actions/setup-java@dded0888837ed1f317902acf8a20df0ad188d165
+        with:
+          distribution: microsoft
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@346a44564f803579f2a9d82d6570fa5c56d80eff
+      - name: Create the external candidate from the canonical lock
+        env:
+          LOCKED_CANDIDATE_ROOT: ${{ runner.temp }}/svg2vd-locked-candidate
+        shell: bash
+        run: |
+          JAVA_HOME="${{ steps.build-java.outputs.path }}" ./gradlew :upstream-sync:discoverLockedCandidate \
+            -PcorpusLock="$GITHUB_WORKSPACE/corpus.lock.json" \
+            -PcandidateOutputDirectory="$LOCKED_CANDIDATE_ROOT" \
+            --dependency-verification strict
+          CANDIDATE_MANIFEST="$(find "$LOCKED_CANDIDATE_ROOT" -maxdepth 1 -type f -name '*.json' -print -quit)"
+          test -n "$CANDIDATE_MANIFEST"
+          cp "$GITHUB_WORKSPACE/corpus.lock.json" "$LOCKED_CANDIDATE_ROOT/corpus.lock.json"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: locked-candidate
+          path: ${{ runner.temp }}/svg2vd-locked-candidate
+          if-no-files-found: error
+
+  verify:
+    name: ${{ matrix.name }}
+    needs: discover
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux-full-corpus
+            os: ubuntu-latest
+            full_corpus: true
+            java_executable: java
+          - name: macos-minimal-corpus
+            os: macos-latest
+            full_corpus: false
+            java_executable: java
+          - name: windows-minimal-corpus
+            os: windows-latest
+            full_corpus: false
+            java_executable: java.exe
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - id: build-java
+        uses: actions/setup-java@dded0888837ed1f317902acf8a20df0ad188d165
+        with:
+          distribution: microsoft
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@346a44564f803579f2a9d82d6570fa5c56d80eff
+      - id: java11
+        uses: actions/setup-java@dded0888837ed1f317902acf8a20df0ad188d165
+        with:
+          distribution: microsoft
+          java-version: '11'
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: locked-candidate
+          path: ${{ runner.temp }}/svg2vd-locked-candidate
+      - name: Locate the shared external candidate
+        if: matrix.os != 'windows-latest'
+        env:
+          LOCKED_CANDIDATE_ROOT: ${{ runner.temp }}/svg2vd-locked-candidate
+        shell: bash
+        run: |
+          cmp -- "$GITHUB_WORKSPACE/corpus.lock.json" "$LOCKED_CANDIDATE_ROOT/corpus.lock.json"
+          CANDIDATE_MANIFEST="$(find "$LOCKED_CANDIDATE_ROOT" -maxdepth 1 -type f -name '*.json' ! -name corpus.lock.json -print -quit)"
+          test -n "$CANDIDATE_MANIFEST"
+          echo "CANDIDATE_MANIFEST=$CANDIDATE_MANIFEST" >> "$GITHUB_ENV"
+      - name: Locate the shared external candidate on Windows
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          $root = Join-Path $env:RUNNER_TEMP 'svg2vd-locked-candidate'
+          $lock = Join-Path $env:GITHUB_WORKSPACE 'corpus.lock.json'
+          $artifactLock = Join-Path $root 'corpus.lock.json'
+          if (-not (Test-Path -LiteralPath $artifactLock -PathType Leaf)) { throw "candidate artifact lock is missing: $artifactLock" }
+          if ((Get-FileHash -LiteralPath $lock -Algorithm SHA256).Hash -ne (Get-FileHash -LiteralPath $artifactLock -Algorithm SHA256).Hash) { throw 'candidate artifact lock does not match checkout lock' }
+          $candidate = Get-ChildItem -LiteralPath $root -File -Filter '*.json' | Where-Object Name -ne 'corpus.lock.json' | Select-Object -First 1
+          if ($null -eq $candidate) { throw "candidate manifest is missing: $root" }
+          "CANDIDATE_MANIFEST=$($candidate.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+      - name: Verify locked build and minimal corpus
+        if: matrix.os != 'windows-latest'
+        env:
+          JAVA_11_EXECUTABLE: ${{ steps.java11.outputs.path }}/bin/${{ matrix.java_executable }}
+          MINIMAL_CORPUS_ROOT: ${{ github.workspace }}/verification/src/test/resources/corpus/minimal/bfa9407b849c8019249e137b3384b4f987a47a3e00bb45e4b3207edf64938acf
+        shell: bash
+        run: |
+          JAVA_HOME="${{ steps.build-java.outputs.path }}" ./gradlew :upstream-sync:test :engine:test :cli:test :cli:shadowJar :verification:corpusTest \
+            -PcandidateManifest="$CANDIDATE_MANIFEST" \
+            -PcorpusManifest="$MINIMAL_CORPUS_ROOT/manifest.json" \
+            -PcorpusRoot="$MINIMAL_CORPUS_ROOT" \
+            -Psvg2vdJar="$GITHUB_WORKSPACE/cli/build/libs/svg2vd-0.1.0-all.jar" \
+            -PjavaExecutable="$JAVA_11_EXECUTABLE" \
+            --dependency-verification strict --rerun-tasks --no-build-cache
+      - name: Verify locked build and minimal corpus on Windows
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          $env:JAVA_HOME = '${{ steps.build-java.outputs.path }}'
+          $java11 = Join-Path '${{ steps.java11.outputs.path }}' 'bin\java.exe'
+          $minimalRoot = Join-Path $env:GITHUB_WORKSPACE 'verification\src\test\resources\corpus\minimal\bfa9407b849c8019249e137b3384b4f987a47a3e00bb45e4b3207edf64938acf'
+          $jar = Join-Path $env:GITHUB_WORKSPACE 'cli\build\libs\svg2vd-0.1.0-all.jar'
+          & '.\gradlew.bat' ':upstream-sync:test' ':engine:test' ':cli:test' ':cli:shadowJar' ':verification:corpusTest' `
+            "-PcandidateManifest=$env:CANDIDATE_MANIFEST" `
+            "-PcorpusManifest=$(Join-Path $minimalRoot 'manifest.json')" `
+            "-PcorpusRoot=$minimalRoot" `
+            "-Psvg2vdJar=$jar" `
+            "-PjavaExecutable=$java11" `
+            '--dependency-verification' 'strict' '--rerun-tasks' '--no-build-cache'
+      - name: Materialize and verify the locked Linux corpus
+        if: matrix.full_corpus
+        env:
+          LOCKED_CANDIDATE_ROOT: ${{ runner.temp }}/svg2vd-locked-candidate
+          LOCKED_CORPUS_ROOT: ${{ runner.temp }}/svg2vd-locked-corpus
+          JAVA_11_EXECUTABLE: ${{ steps.java11.outputs.path }}/bin/${{ matrix.java_executable }}
+        shell: bash
+        run: |
+          JAVA_HOME="${{ steps.build-java.outputs.path }}" ./gradlew :upstream-sync:syncCorpus \
+            -PcandidateManifest="$CANDIDATE_MANIFEST" \
+            -PcorpusOutputDirectory="$LOCKED_CORPUS_ROOT" \
+            --dependency-verification strict
+          CORPUS_MANIFEST="$(find "$LOCKED_CORPUS_ROOT" -name manifest.json -print -quit)"
+          test -n "$CORPUS_MANIFEST"
+          test "$(shasum -a 256 "$CORPUS_MANIFEST" | awk '{print $1}')" = "$(jq -r .corpus_manifest_sha256 "$GITHUB_WORKSPACE/corpus.lock.json")"
+          JAVA_HOME="${{ steps.build-java.outputs.path }}" ./gradlew :verification:corpusTest \
+            -PcandidateManifest="$CANDIDATE_MANIFEST" \
+            -PcorpusManifest="$CORPUS_MANIFEST" \
+            -PcorpusRoot="$(dirname "$CORPUS_MANIFEST")" \
+            -Psvg2vdJar="$GITHUB_WORKSPACE/cli/build/libs/svg2vd-0.1.0-all.jar" \
+            -PjavaExecutable="$JAVA_11_EXECUTABLE" \
+            --dependency-verification strict --rerun-tasks --no-build-cache
+      - if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: ${{ matrix.name }}-artifacts
+          path: |
+            verification/build/corpus-artifacts
+            ${{ runner.temp }}/svg2vd-locked-candidate
+            ${{ runner.temp }}/svg2vd-locked-corpus
+          if-no-files-found: ignore

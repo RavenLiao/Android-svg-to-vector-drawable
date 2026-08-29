@@ -1,0 +1,46 @@
+version: 2
+paths:
+  - sdk-common/src/main/java/com/android/ide/common/vectordrawable
+  - sdk-common/src/main/java/com/android/ide/common/util/AssetUtil.java
+  - annotations/src/main/java/com/android/annotations
+  - common/src/main/java/com/android/SdkConstants.java
+  - common/src/main/java/com/android/ProgressManagerAdapter.java
+  - common/src/main/java/com/android/sdklib/AndroidVersion.java
+  - common/src/main/java/com/android/utils/Pair.java
+  - common/src/main/java/com/android/utils/DecimalUtils.java
+  - common/src/main/java/com/android/utils/PositionXmlParser.java
+  - common/src/main/java/com/android/utils/XmlUtils.java
+  - common/src/main/java/com/android/ide/common/blame/SourceFile.java
+  - common/src/main/java/com/android/ide/common/blame/SourceFilePosition.java
+  - common/src/main/java/com/android/ide/common/blame/SourcePosition.java
+  - common/src/main/java/com/android/sdklib/AndroidApiLevel.kt
+  - common/src/main/java/com/android/sdklib/AndroidMajorVersion.kt
+  - common/agp-version/Version.java
+  - common/src/main/java/com/android/utils/CharSequences.java
+  - common/src/main/java/com/android/utils/CharSequenceReader.java
+blob_paths:
+  - sdk-common/src/main/java/com/android/ide/common/util/AssetUtil.java
+  - common/src/main/java/com/android/SdkConstants.java
+  - common/src/main/java/com/android/ProgressManagerAdapter.java
+  - common/src/main/java/com/android/sdklib/AndroidVersion.java
+  - common/src/main/java/com/android/utils/Pair.java
+  - common/src/main/java/com/android/utils/DecimalUtils.java
+  - common/src/main/java/com/android/utils/PositionXmlParser.java
+  - common/src/main/java/com/android/utils/XmlUtils.java
+  - common/src/main/java/com/android/ide/common/blame/SourceFile.java
+  - common/src/main/java/com/android/ide/common/blame/SourceFilePosition.java
+  - common/src/main/java/com/android/ide/common/blame/SourcePosition.java
+  - common/src/main/java/com/android/sdklib/AndroidApiLevel.kt
+  - common/src/main/java/com/android/sdklib/AndroidMajorVersion.kt
+  - common/agp-version/Version.java
+  - common/src/main/java/com/android/utils/CharSequences.java
+  - common/src/main/java/com/android/utils/CharSequenceReader.java
+history_allowlist:
+  - studio-1.4
+  - studio-1.5
+  - studio-2.0
+  - studio-2.0-rc1
+  - studio-2.2
+  - studio-2.2-preview3
+  - studio-2.3
+  - studio-3.0

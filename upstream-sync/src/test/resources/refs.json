@@ -1,0 +1,9 @@
+{
+  "refs/tags/studio-2024.1.1-patch01": {"value": "tag-2024-p01", "peeled": "commit-2024-p01"},
+  "refs/tags/studio-2025.1.1-patch1": {"value": "tag-2025-p1", "peeled": "commit-2025-p1"},
+  "refs/tags/studio-2025.1.1-patch2": {"value": "tag-2025-p2", "peeled": "commit-2025-p2"},
+  "refs/tags/studio-2025.1.1-patch10": {"value": "tag-2025-p10", "peeled": "commit-2025-p10"},
+  "refs/tags/studio-2026.1.2": {"value": "tag-2026-1-2", "peeled": "commit-2026-1-2"},
+  "refs/tags/studio-2026.1.3-rc01": {"value": "tag-2026-1-3-rc", "peeled": "commit-2026-1-3-rc"},
+  "refs/tags/studio-2026.1.3": {"value": "tag-2026-1-3", "peeled": "commit-2026-1-3"}
+}

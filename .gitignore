@@ -1,0 +1,11 @@
+.gradle/
+.kotlin/
+build/
+**/build/
+.worktrees/
+work/
+*.class
+.idea/
+out/
+.DS_Store
+.cache/
