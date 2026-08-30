@@ -140,6 +140,7 @@ class BuildContractTest {
         assertTrue(releaseText.contains("workflow_run.head_sha"))
         assertFalse(releaseText.contains("GITHUB_SHA"), "Release must use workflow_run.head_sha for provenance")
         assertTrue(releaseText.contains("released_tag_count"))
+        assertTrue(releaseText.contains("git config user.name"), "Release must configure an identity before creating an annotated tag")
 
         val updateText = Files.readString(projectRoot.resolve(".github/workflows/upstream-update.yml"))
         assertTrue(updateText.contains("bumpToolPatchVersion"))

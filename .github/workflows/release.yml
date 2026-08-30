@@ -145,6 +145,8 @@ jobs:
         shell: bash
         run: |
           git fetch origin --tags --quiet
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           if git show-ref --verify --quiet "refs/tags/$RELEASE_TAG"; then
             test "$(git rev-list -n 1 "$RELEASE_TAG")" = "$TOOL_SOURCE_SHA" || { echo "tag target mismatch"; exit 1; }
           else
