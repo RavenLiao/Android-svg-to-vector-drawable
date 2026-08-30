@@ -51,11 +51,15 @@ jobs:
           CORPUS_MANIFEST="$(find "$CORPUS_ROOT" -name manifest.json -print -quit)"
           test -n "$CORPUS_MANIFEST"
           test "$(shasum -a 256 "$CORPUS_MANIFEST" | awk '{print $1}')" = "$(jq -r .corpus_manifest_sha256 "$LOCK_PATH")"
+          TOOL_VERSION="$(sed -n 's/^svg2vdVersion=//p' gradle.properties)"
+          test "$(grep -c '^svg2vdVersion=' gradle.properties)" -eq 1
+          test -n "$TOOL_VERSION"
+          JAR_PATH="$GITHUB_WORKSPACE/cli/build/libs/svg2vd-${TOOL_VERSION}-all.jar"
           JAVA_HOME="${{ steps.build-java.outputs.path }}" ./gradlew :upstream-sync:test :engine:test :cli:test :cli:shadowJar :verification:corpusTest \
             -PcandidateManifest="$CANDIDATE_MANIFEST" \
             -PcorpusManifest="$CORPUS_MANIFEST" \
             -PcorpusRoot="$(dirname "$CORPUS_MANIFEST")" \
-            -Psvg2vdJar="$GITHUB_WORKSPACE/cli/build/libs/svg2vd-0.1.0-all.jar" \
+            -Psvg2vdJar="$JAR_PATH" \
             -PjavaExecutable="$JAVA_11_EXECUTABLE" \
             --dependency-verification strict --rerun-tasks --no-build-cache
       - if: always()

@@ -100,9 +100,13 @@ class BuildContractTest {
         val projectRoot = Path.of(requireNotNull(System.getProperty("svg2vd.projectRoot")))
         val ci = workflow(projectRoot.resolve(".github/workflows/ci.yml"))
         val upstream = workflow(projectRoot.resolve(".github/workflows/upstream-corpus.yml"))
+        val release = workflow(projectRoot.resolve(".github/workflows/release.yml"))
+        val update = workflow(projectRoot.resolve(".github/workflows/upstream-update.yml"))
 
         assertPinnedActions(ci)
         assertPinnedActions(upstream)
+        assertPinnedActions(release)
+        assertPinnedActions(update)
         assertGradleRunsUseBuildJdk(ci)
         assertGradleRunsUseBuildJdk(upstream)
         assertReusableWorkflowConsumesCandidateArtifact(upstream)
@@ -119,6 +123,7 @@ class BuildContractTest {
         assertFalse(Regex("(?i)\\b(release|publish|upload-to-maven)\\b").containsMatchIn(ciText))
         assertFalse(ciText.contains("contents: write"))
         assertFalse(ciText.contains("packages: write"))
+        assertFalse(ciText.contains("svg2vd-0.1.0-all.jar"), "CI must derive the JAR path from svg2vdVersion")
 
         val upstreamText = Files.readString(projectRoot.resolve(".github/workflows/upstream-corpus.yml"))
         assertTrue((upstream["on"] as? Map<*, *>)?.containsKey("workflow_call") == true)
@@ -127,6 +132,19 @@ class BuildContractTest {
         assertTrue("corpus_manifest_sha256" in upstreamText)
         assertTrue("corpusTest" in upstreamText)
         assertFalse("JAVA_TOOL_OPTIONS" in upstreamText, "workflow-level JAVA_TOOL_OPTIONS pollutes CLI stderr")
+        assertFalse(upstreamText.contains("svg2vd-0.1.0-all.jar"), "Reusable corpus gate must derive the JAR path from svg2vdVersion")
+
+        val releaseText = Files.readString(projectRoot.resolve(".github/workflows/release.yml"))
+        assertTrue((release["on"] as? Map<*, *>)?.containsKey("workflow_run") == true)
+        assertTrue(releaseText.contains("types: [completed]"))
+        assertTrue(releaseText.contains("workflow_run.head_sha"))
+        assertFalse(releaseText.contains("GITHUB_SHA"), "Release must use workflow_run.head_sha for provenance")
+        assertTrue(releaseText.contains("released_tag_count"))
+
+        val updateText = Files.readString(projectRoot.resolve(".github/workflows/upstream-update.yml"))
+        assertTrue(updateText.contains("bumpToolPatchVersion"))
+        assertTrue(updateText.contains("match-head-commit"))
+        assertTrue(updateText.contains("corpus.lock.json|gradle.properties"))
     }
 
     @Test

@@ -8,7 +8,7 @@ For a PR, CI first runs `:upstream-sync:discoverLockedCandidate` from this lock.
 
 The standard CI workflow runs this discovery once on Ubuntu and uploads the immutable candidate as an artifact. The Linux, macOS, and Windows verification jobs download that same candidate instead of repeating the Gitiles requests. Gradle distributions and dependency caches remain outside the repository; locally they may be grouped by setting `GRADLE_USER_HOME` to an ignored `.cache/gradle` directory.
 
-Gradle runs on JDK 17 or newer; the release JAR is invoked with a separately installed Java 11 executable. The Linux job materializes and compares the full locked PNG corpus. macOS and Windows run only the committed minimal corpus to prove the Java 11 JAR process contract. The scheduled `Upstream Update Check` workflow creates a PR for a newer stable tag, while `Release` publishes only an explicitly pushed `vX.Y.Z` tag after checking the matching CI result.
+Gradle runs on JDK 17 or newer; the release JAR is invoked with a separately installed Java 11 executable. The Linux job materializes and compares the full locked PNG corpus. macOS and Windows run only the committed minimal corpus to prove the Java 11 JAR process contract. The scheduled `Upstream Update Check` workflow creates a PR for the newest stable tag and increments the tool patch version. After that PR or a manual version bump reaches `main`, the `Release` workflow publishes the next `vX.Y.Z` tag only after the matching CI run succeeds.
 
 When a network environment can reach the fixed commit reliably, create the lock outside the checkout:
 

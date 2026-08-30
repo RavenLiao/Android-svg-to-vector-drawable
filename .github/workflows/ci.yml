@@ -105,11 +105,15 @@ jobs:
           MINIMAL_CORPUS_ROOT: ${{ github.workspace }}/verification/src/test/resources/corpus/minimal/bfa9407b849c8019249e137b3384b4f987a47a3e00bb45e4b3207edf64938acf
         shell: bash
         run: |
+          TOOL_VERSION="$(sed -n 's/^svg2vdVersion=//p' gradle.properties)"
+          test "$(grep -c '^svg2vdVersion=' gradle.properties)" -eq 1
+          test -n "$TOOL_VERSION"
+          JAR_PATH="$GITHUB_WORKSPACE/cli/build/libs/svg2vd-${TOOL_VERSION}-all.jar"
           JAVA_HOME="${{ steps.build-java.outputs.path }}" ./gradlew :upstream-sync:test :engine:test :cli:test :cli:shadowJar :verification:corpusTest \
             -PcandidateManifest="$CANDIDATE_MANIFEST" \
             -PcorpusManifest="$MINIMAL_CORPUS_ROOT/manifest.json" \
             -PcorpusRoot="$MINIMAL_CORPUS_ROOT" \
-            -Psvg2vdJar="$GITHUB_WORKSPACE/cli/build/libs/svg2vd-0.1.0-all.jar" \
+            -Psvg2vdJar="$JAR_PATH" \
             -PjavaExecutable="$JAVA_11_EXECUTABLE" \
             --dependency-verification strict --rerun-tasks --no-build-cache
       - name: Verify locked build and minimal corpus on Windows
@@ -119,7 +123,10 @@ jobs:
           $env:JAVA_HOME = '${{ steps.build-java.outputs.path }}'
           $java11 = Join-Path '${{ steps.java11.outputs.path }}' 'bin\java.exe'
           $minimalRoot = Join-Path $env:GITHUB_WORKSPACE 'verification\src\test\resources\corpus\minimal\bfa9407b849c8019249e137b3384b4f987a47a3e00bb45e4b3207edf64938acf'
-          $jar = Join-Path $env:GITHUB_WORKSPACE 'cli\build\libs\svg2vd-0.1.0-all.jar'
+          $toolVersion = (Get-Content (Join-Path $env:GITHUB_WORKSPACE 'gradle.properties') | Where-Object { $_ -match '^svg2vdVersion=(.+)$' } | Select-Object -First 1) -replace '^svg2vdVersion=', ''
+          if ((Get-Content (Join-Path $env:GITHUB_WORKSPACE 'gradle.properties') | Where-Object { $_ -match '^svg2vdVersion=' }).Count -ne 1) { throw 'gradle.properties must contain exactly one svg2vdVersion' }
+          if ([string]::IsNullOrWhiteSpace($toolVersion)) { throw 'svg2vdVersion is missing' }
+          $jar = Join-Path $env:GITHUB_WORKSPACE "cli\build\libs\svg2vd-$toolVersion-all.jar"
           & '.\gradlew.bat' ':upstream-sync:test' ':engine:test' ':cli:test' ':cli:shadowJar' ':verification:corpusTest' `
             "-PcandidateManifest=$env:CANDIDATE_MANIFEST" `
             "-PcorpusManifest=$(Join-Path $minimalRoot 'manifest.json')" `
@@ -135,6 +142,10 @@ jobs:
           JAVA_11_EXECUTABLE: ${{ steps.java11.outputs.path }}/bin/${{ matrix.java_executable }}
         shell: bash
         run: |
+          TOOL_VERSION="$(sed -n 's/^svg2vdVersion=//p' gradle.properties)"
+          test "$(grep -c '^svg2vdVersion=' gradle.properties)" -eq 1
+          test -n "$TOOL_VERSION"
+          JAR_PATH="$GITHUB_WORKSPACE/cli/build/libs/svg2vd-${TOOL_VERSION}-all.jar"
           JAVA_HOME="${{ steps.build-java.outputs.path }}" ./gradlew :upstream-sync:syncCorpus \
             -PcandidateManifest="$CANDIDATE_MANIFEST" \
             -PcorpusOutputDirectory="$LOCKED_CORPUS_ROOT" \
@@ -146,7 +157,7 @@ jobs:
             -PcandidateManifest="$CANDIDATE_MANIFEST" \
             -PcorpusManifest="$CORPUS_MANIFEST" \
             -PcorpusRoot="$(dirname "$CORPUS_MANIFEST")" \
-            -Psvg2vdJar="$GITHUB_WORKSPACE/cli/build/libs/svg2vd-0.1.0-all.jar" \
+            -Psvg2vdJar="$JAR_PATH" \
             -PjavaExecutable="$JAVA_11_EXECUTABLE" \
             --dependency-verification strict --rerun-tasks --no-build-cache
       - if: always()

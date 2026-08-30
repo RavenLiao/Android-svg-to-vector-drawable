@@ -24,6 +24,8 @@ val candidateManifest = providers.gradleProperty("candidateManifest")
 val candidateOutputDirectory = providers.gradleProperty("candidateOutputDirectory")
 val candidateTag = providers.gradleProperty("candidateTag")
 val latestTagOutput = providers.gradleProperty("latestTagOutput")
+val toolVersionFile = providers.gradleProperty("toolVersionFile")
+val expectedToolVersion = providers.gradleProperty("expectedToolVersion")
 val corpusLock = providers.gradleProperty("corpusLock")
 val corpusOutputDirectory = providers.gradleProperty("corpusOutputDirectory")
 val corpusManifestInput = providers.gradleProperty("corpusManifest")
@@ -160,6 +162,18 @@ tasks.register<JavaExec>("discoverLatestStableTag") {
         val lock = corpusLock.orNull ?: error("-PcorpusLock=<canonical corpus lock> is required")
         val output = latestTagOutput.orNull ?: error("-PlatestTagOutput=<external output file> is required")
         args(lock, output)
+    }
+}
+
+tasks.register<JavaExec>("bumpToolPatchVersion") {
+    group = "release"
+    description = "Increments the patch component of the checked-in tool version after an exact-value check."
+    classpath = sourceSets.main.get().runtimeClasspath
+    mainClass.set("io.github.ravenliao.svg2vd.upstream.ToolVersionMain")
+    doFirst {
+        val file = toolVersionFile.orNull ?: error("-PtoolVersionFile=<gradle.properties> is required")
+        val expected = expectedToolVersion.orNull ?: error("-PexpectedToolVersion=X.Y.Z is required")
+        args("bump-patch", file, expected)
     }
 }
 

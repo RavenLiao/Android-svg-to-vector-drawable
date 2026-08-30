@@ -79,4 +79,4 @@ java -jar cli/build/libs/svg2vd-0.1.0-all.jar \
 
 GitHub Actions 使用 JDK 17 构建，并以独立的 Java 11 可执行程序验证产物兼容性。Linux 运行完整视觉语料；macOS 和 Windows 运行仓库内提交的最小语料契约。图像比较器、语料运行器和审计产物均只属于测试，不会被打进 fat JAR。CI 始终以 headless 模式运行，不会打开图形窗口。
 
-维护与更新 lock 的流程见 [docs/upstream-visual-corpus.md](docs/upstream-visual-corpus.md)。`Upstream Update Check` 每天检查新的 Android Studio 稳定 Tag，重新生成 `corpus.lock.json` 并创建更新 PR。向通过 CI 的提交推送 `v0.1.0` 形式的 Git tag 后，发布 workflow 会构建并发布 JAR、`SHA256SUMS` 和 `provenance.json`。工具版本与 Android Studio 版本独立，后者会记录在产物名称和 provenance 中。
+维护与更新 lock 的流程见 [docs/upstream-visual-corpus.md](docs/upstream-visual-corpus.md)。`Upstream Update Check` 每天检查新的 Android Studio 稳定 Tag，自动递增工具 patch 版本，重新生成 `corpus.lock.json` 并创建更新 PR。PR 或手工版本更新进入 `main` 后，`Release` workflow 会等待对应的 CI 成功，自动创建不可变的 `vX.Y.Z` Tag，并发布 JAR、`SHA256SUMS` 和 `provenance.json`。工具版本与 Android Studio 版本独立，后者会记录在产物名称和 provenance 中。

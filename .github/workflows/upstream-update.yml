@@ -19,6 +19,7 @@ jobs:
       update: ${{ steps.result.outputs.update }}
       tag: ${{ steps.result.outputs.tag }}
       artifact: ${{ steps.result.outputs.artifact }}
+      version: ${{ steps.result.outputs.version }}
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
       - id: build-java
@@ -33,6 +34,10 @@ jobs:
         shell: bash
         run: |
           mkdir -p "$UPDATE_ROOT"
+          base_commit="$(git rev-parse HEAD)"
+          base_version="$(sed -n 's/^svg2vdVersion=//p' gradle.properties)"
+          [[ "$base_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          base_lock_sha256="$(sha256sum corpus.lock.json | awk '{print $1}')"
           JAVA_HOME="${{ steps.build-java.outputs.path }}" ./gradlew :upstream-sync:discoverLatestStableTag \
             -PcorpusLock="$GITHUB_WORKSPACE/corpus.lock.json" \
             -PlatestTagOutput="$UPDATE_ROOT/latest-tag.txt" \
@@ -42,6 +47,7 @@ jobs:
             echo 'update=false' >> "$GITHUB_OUTPUT"
             echo 'tag=' >> "$GITHUB_OUTPUT"
             echo 'artifact=' >> "$GITHUB_OUTPUT"
+            echo 'version=' >> "$GITHUB_OUTPUT"
             exit 0
           fi
           candidate="$UPDATE_ROOT/candidate"
@@ -63,19 +69,41 @@ jobs:
             echo 'update=false' >> "$GITHUB_OUTPUT"
             echo 'tag=' >> "$GITHUB_OUTPUT"
             echo 'artifact=' >> "$GITHUB_OUTPUT"
+            echo 'version=' >> "$GITHUB_OUTPUT"
             exit 0
           }
+          current_version="$(sed -n 's/^svg2vdVersion=//p' gradle.properties)"
+          [[ "$current_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          cp gradle.properties "$UPDATE_ROOT/gradle.properties"
+          JAVA_HOME="${{ steps.build-java.outputs.path }}" ./gradlew :upstream-sync:bumpToolPatchVersion \
+            "-PtoolVersionFile=$UPDATE_ROOT/gradle.properties" \
+            "-PexpectedToolVersion=$current_version" --dependency-verification strict
+          next_version="$(sed -n 's/^svg2vdVersion=//p' "$UPDATE_ROOT/gradle.properties")"
+          [[ "$next_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          manifest_sha256="$(sha256sum "$manifest" | awk '{print $1}')"
+          engine_fingerprint="$(jq -r '.engine_fingerprint' "$manifest")"
+          tag_object="$(jq -r '.tag.tag_object' "$manifest")"
+          peeled_commit="$(jq -r '.tag.peeled_commit' "$manifest")"
+          jq -n --sort-keys \
+            --arg tag "$tag" --arg tag_object "$tag_object" --arg peeled_commit "$peeled_commit" \
+            --arg manifest_sha256 "$manifest_sha256" --arg engine_fingerprint "$engine_fingerprint" \
+            --arg tool_version "$next_version" --arg base_commit "$base_commit" --arg base_version "$base_version" --arg base_lock_sha256 "$base_lock_sha256" \
+            '{tag:$tag,tag_object:$tag_object,peeled_commit:$peeled_commit,candidate_manifest_sha256:$manifest_sha256,engine_fingerprint:$engine_fingerprint,tool_version:$tool_version,base_commit:$base_commit,base_version:$base_version,base_lock_sha256:$base_lock_sha256}' \
+            > "$UPDATE_ROOT/upstream-update.json"
           artifact="upstream-lock-$tag"
           echo 'update=true' >> "$GITHUB_OUTPUT"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           echo "artifact=$artifact" >> "$GITHUB_OUTPUT"
+          echo "version=$next_version" >> "$GITHUB_OUTPUT"
           mkdir -p "$UPDATE_ROOT/artifact"
           cp "$UPDATE_ROOT/corpus.lock.json" "$UPDATE_ROOT/artifact/corpus.lock.json"
+          cp "$UPDATE_ROOT/gradle.properties" "$UPDATE_ROOT/artifact/gradle.properties"
+          cp "$UPDATE_ROOT/upstream-update.json" "$UPDATE_ROOT/artifact/upstream-update.json"
       - if: steps.result.outputs.update == 'true'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: ${{ steps.result.outputs.artifact }}
-          path: ${{ runner.temp }}/svg2vd-upstream-update/artifact/corpus.lock.json
+          path: ${{ runner.temp }}/svg2vd-upstream-update/artifact
           if-no-files-found: error
 
   propose:
@@ -99,6 +127,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           UPSTREAM_TAG: ${{ needs.discover.outputs.tag }}
+          NEXT_VERSION: ${{ needs.discover.outputs.version }}
         shell: bash
         run: |
           branch="automation/upstream-$UPSTREAM_TAG"
@@ -107,13 +136,58 @@ jobs:
           git fetch origin "$branch" || true
           git checkout -B "$branch" origin/main
           cp "$RUNNER_TEMP/upstream-lock/corpus.lock.json" corpus.lock.json
-          git add corpus.lock.json
+          cp "$RUNNER_TEMP/upstream-lock/gradle.properties" gradle.properties
+          metadata="$RUNNER_TEMP/upstream-lock/upstream-update.json"
+          test "$(jq -r '.tag' "$metadata")" = "$UPSTREAM_TAG"
+          test "$(jq -r '.tool_version' "$metadata")" = "$NEXT_VERSION"
+          git fetch origin main --quiet
+          test "$(git rev-parse origin/main)" = "$(jq -r '.base_commit' "$metadata")" || { echo 'main advanced since discovery; retry the scheduled update'; exit 1; }
+          test "$(git show origin/main:gradle.properties | sed -n 's/^svg2vdVersion=//p')" = "$(jq -r '.base_version' "$metadata")"
+          current_lock_sha256="$(git show origin/main:corpus.lock.json | sha256sum | awk '{print $1}')"
+          test "$current_lock_sha256" = "$(jq -r '.base_lock_sha256' "$metadata")"
+          git add corpus.lock.json gradle.properties
+          unexpected="$(git diff --cached --name-only | grep -v -E '^(corpus.lock.json|gradle.properties)$' || true)"
+          test -z "$unexpected"
           if git diff --cached --quiet; then exit 0; fi
-          git commit -m "Update Android Studio corpus to $UPSTREAM_TAG"
+          git commit -m "Update Android Studio corpus to $UPSTREAM_TAG ($NEXT_VERSION)"
           git push --force-with-lease origin "$branch"
-          gh workflow run ci.yml --ref "$branch"
           if ! gh pr list --head "$branch" --state open --json number --jq '.[0].number' | grep -q .; then
+            body="Automated upstream update for $UPSTREAM_TAG. Tool version: $NEXT_VERSION."
+            body+=$'\n\n'
+            body+="Tag object: $(jq -r '.tag_object' "$metadata")"
+            body+=$'\n'
+            body+="Peeled commit: $(jq -r '.peeled_commit' "$metadata")"
+            body+=$'\n'
+            body+="Candidate manifest SHA-256: $(jq -r '.candidate_manifest_sha256' "$metadata")"
+            body+=$'\n'
+            body+="Engine fingerprint: $(jq -r '.engine_fingerprint' "$metadata")"
             gh pr create --base main --head "$branch" \
               --title "Update Android Studio corpus to $UPSTREAM_TAG" \
-              --body "Automated upstream update for $UPSTREAM_TAG. CI must pass before merge."
+              --body "$body"
           fi
+          pr="$(gh pr list --head "$branch" --state open --json number --jq '.[0].number')"
+          head_sha="$(git rev-parse HEAD)"
+          started_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          gh workflow run ci.yml --ref "$branch"
+          run_id=''
+          for _ in $(seq 1 30); do
+            run_id="$(gh run list --workflow ci.yml --branch "$branch" --event workflow_dispatch --limit 20 --json databaseId,headSha,createdAt | jq -r --arg sha "$head_sha" --arg started "$started_at" 'map(select(.headSha == $sha and .createdAt >= $started)) | sort_by(.createdAt) | last | .databaseId // empty')"
+            test -n "$run_id" && break
+            sleep 10
+          done
+          test -n "$run_id"
+          for _ in $(seq 1 60); do
+            state="$(gh run view "$run_id" --json status,conclusion,headSha --jq '[.status,.conclusion,.headSha] | @tsv')"
+            IFS=$'\t' read -r status conclusion checked_sha <<< "$state"
+            test "$checked_sha" = "$head_sha"
+            if [ "$status" = completed ]; then
+              test "$conclusion" = success
+              break
+            fi
+            sleep 30
+          done
+          test "$conclusion" = success
+          pr_state="$(gh pr view "$pr" --json state,headRefOid,mergeable --jq '[.state,.headRefOid,.mergeable] | @tsv')"
+          IFS=$'\t' read -r state pr_head mergeable <<< "$pr_state"
+          test "$state" = OPEN && test "$pr_head" = "$head_sha" && test "$mergeable" != CONFLICTING
+          gh pr merge "$pr" --squash --delete-branch --match-head-commit "$head_sha"

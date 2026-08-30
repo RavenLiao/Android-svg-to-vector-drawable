@@ -1,51 +1,95 @@
 name: Release
 
 on:
-  push:
-    tags:
-      - 'v*.*.*'
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
 
 permissions:
   contents: read
 
 concurrency:
-  group: release-${{ github.ref_name }}
+  group: release-${{ github.event.workflow_run.head_sha }}
   cancel-in-progress: false
 
 jobs:
-  release:
-    name: Build and publish release
+  build:
+    name: Build release bundle
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'main'
     runs-on: ubuntu-latest
     permissions:
       contents: read
       actions: read
+    outputs:
+      publish: ${{ steps.release.outputs.publish }}
+      tag: ${{ steps.release.outputs.tag }}
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
-          ref: ${{ github.ref }}
+          ref: ${{ github.event.workflow_run.head_sha }}
           fetch-depth: 0
-      - name: Require a successful CI run for this commit
+      - id: release
         env:
-          GH_TOKEN: ${{ github.token }}
+          TOOL_SOURCE_SHA: ${{ github.event.workflow_run.head_sha }}
+        shell: bash
         run: |
           git fetch origin main --quiet
-          git merge-base --is-ancestor "$GITHUB_SHA" origin/main
-          passed="$(gh run list --workflow ci.yml --commit "$GITHUB_SHA" --status completed --limit 20 --json conclusion,event,headBranch --jq 'map(select(.conclusion=="success" and .event=="push" and .headBranch=="main")) | length')"
-          test "$passed" -gt 0 || { echo "CI has not passed for $GITHUB_SHA on main"; exit 1; }
+          git fetch origin --tags --quiet
+          git merge-base --is-ancestor "$TOOL_SOURCE_SHA" origin/main
+          version="$(sed -n 's/^svg2vdVersion=//p' gradle.properties)"
+          test "$(grep -c '^svg2vdVersion=' gradle.properties)" -eq 1
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          tag="v$version"
+          tag_exists=false
+          if git show-ref --verify --quiet "refs/tags/$tag"; then tag_exists=true; fi
+          parent="$(git rev-parse "$TOOL_SOURCE_SHA^" 2>/dev/null || true)"
+          version_changed=true
+          if [ -n "$parent" ]; then
+            parent_version="$(git show "$parent:gradle.properties" 2>/dev/null | sed -n 's/^svg2vdVersion=//p')"
+            if [ "$version" = "$parent_version" ]; then
+              version_changed=false
+            fi
+          fi
+          released_tag_count=0
+          while IFS= read -r existing_tag; do
+            if [[ "$existing_tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              released_tag_count=$((released_tag_count + 1))
+            fi
+          done < <(git tag -l 'v*')
+          if [ "$version_changed" = false ] && [ "$released_tag_count" -gt 0 ]; then
+            echo 'publish=false' >> "$GITHUB_OUTPUT"
+            echo 'tag=' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ "$tag_exists" = true ]; then
+            if [ "$version_changed" = false ]; then
+              echo 'publish=false' >> "$GITHUB_OUTPUT"
+              echo 'tag=' >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            test "$(git rev-list -n 1 "$tag")" = "$TOOL_SOURCE_SHA" || { echo "tag $tag points to a different commit"; exit 1; }
+          fi
+          echo 'publish=true' >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
       - id: build-java
+        if: steps.release.outputs.publish == 'true'
         uses: actions/setup-java@dded0888837ed1f317902acf8a20df0ad188d165
         with:
           distribution: microsoft
           java-version: '17'
-      - uses: gradle/actions/setup-gradle@346a44564f803579f2a9d82d6570fa5c56d80eff
-      - name: Build the locked release JAR
+      - if: steps.release.outputs.publish == 'true'
+        uses: gradle/actions/setup-gradle@346a44564f803579f2a9d82d6570fa5c56d80eff
+      - name: Build locked release artifacts
+        if: steps.release.outputs.publish == 'true'
         env:
-          RELEASE_VERSION: ${{ github.ref_name }}
+          RELEASE_VERSION: ${{ steps.release.outputs.tag }}
           LOCKED_CANDIDATE_ROOT: ${{ runner.temp }}/svg2vd-locked-candidate
         shell: bash
         run: |
           version="${RELEASE_VERSION#v}"
-          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
           JAVA_HOME="${{ steps.build-java.outputs.path }}" ./gradlew :upstream-sync:discoverLockedCandidate \
             -PcorpusLock="$GITHUB_WORKSPACE/corpus.lock.json" \
             -PcandidateOutputDirectory="$LOCKED_CANDIDATE_ROOT" \
@@ -66,20 +110,11 @@ jobs:
           engine_fingerprint="$(jq -r '.engine_fingerprint' "$candidate_manifest")"
           peeled_commit="$(jq -r '.tag.peeled_commit' "$candidate_manifest")"
           printf '%s  %s\n' "$jar_sha" "$release_jar" > SHA256SUMS
-          jq -n --sort-keys \
-            --arg schema_version "1" \
-            --arg tool_version "$version" \
-            --arg tool_source_commit "$GITHUB_SHA" \
-            --arg upstream_tag "$upstream_tag" \
-            --arg upstream_commit "$peeled_commit" \
-            --arg engine_fingerprint "$engine_fingerprint" \
-            --arg corpus_lock_sha256 "$lock_sha" \
-            --arg artifact_name "$release_jar" \
-            --arg artifact_sha256 "$jar_sha" \
-            '{schema_version:($schema_version|tonumber), tool_version:$tool_version, tool_source_commit:$tool_source_commit, upstream_tag:$upstream_tag, upstream_commit:$upstream_commit, engine_fingerprint:$engine_fingerprint, corpus_lock_sha256:$corpus_lock_sha256, artifacts:[{name:$artifact_name,sha256:$artifact_sha256}]}' > provenance.json
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+          jq -n --sort-keys --arg tool_version "$version" --arg tool_source_commit "${{ github.event.workflow_run.head_sha }}" --arg upstream_tag "$upstream_tag" --arg upstream_commit "$peeled_commit" --arg engine_fingerprint "$engine_fingerprint" --arg corpus_lock_sha256 "$lock_sha" --arg artifact_name "$release_jar" --arg artifact_sha256 "$jar_sha" '{schema_version:1,tool_version:$tool_version,tool_source_commit:$tool_source_commit,upstream_tag:$upstream_tag,upstream_commit:$upstream_commit,engine_fingerprint:$engine_fingerprint,corpus_lock_sha256:$corpus_lock_sha256,artifacts:[{name:$artifact_name,sha256:$artifact_sha256}]}' > provenance.json
+      - if: steps.release.outputs.publish == 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: release-bundle-${{ github.ref_name }}
+          name: release-bundle-${{ steps.release.outputs.tag }}-${{ github.event.workflow_run.head_sha }}
           path: |
             svg2vd-*-all.jar
             SHA256SUMS
@@ -88,31 +123,44 @@ jobs:
 
   publish:
     name: Publish GitHub Release
-    needs: release
+    needs: build
+    if: needs.build.outputs.publish == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          fetch-depth: 0
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
-          name: release-bundle-${{ github.ref_name }}
+          name: release-bundle-${{ needs.build.outputs.tag }}-${{ github.event.workflow_run.head_sha }}
           path: release-bundle
-      - name: Create the GitHub Release
+      - name: Create or verify immutable tag and release
         env:
           GH_TOKEN: ${{ github.token }}
+          TOOL_SOURCE_SHA: ${{ github.event.workflow_run.head_sha }}
+          RELEASE_TAG: ${{ needs.build.outputs.tag }}
         shell: bash
         run: |
-          tag="$GITHUB_REF_NAME"
-          if gh release view "$tag" >/dev/null 2>&1; then
+          git fetch origin --tags --quiet
+          if git show-ref --verify --quiet "refs/tags/$RELEASE_TAG"; then
+            test "$(git rev-list -n 1 "$RELEASE_TAG")" = "$TOOL_SOURCE_SHA" || { echo "tag target mismatch"; exit 1; }
+          else
+            git tag -a "$RELEASE_TAG" "$TOOL_SOURCE_SHA" -m "svg2vd $RELEASE_TAG"
+            git push origin "$RELEASE_TAG"
+          fi
+          jar_name="$(jq -r '.artifacts[0].name' release-bundle/provenance.json)"
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
             existing="$(mktemp -d)"
-            gh release download "$tag" --pattern SHA256SUMS --pattern provenance.json --dir "$existing" --clobber
+            gh release download "$RELEASE_TAG" --pattern "$jar_name" --pattern SHA256SUMS --pattern provenance.json --dir "$existing" --clobber
+            expected_assets="$(printf '%s\n' "$jar_name" SHA256SUMS provenance.json | sort)"
+            actual_assets="$(gh release view "$RELEASE_TAG" --json assets --jq '.assets[].name' | sort)"
+            test "$actual_assets" = "$expected_assets"
             cmp -- release-bundle/SHA256SUMS "$existing/SHA256SUMS"
             cmp -- release-bundle/provenance.json "$existing/provenance.json"
-            artifact="$(jq -r '.artifacts[0].name' release-bundle/provenance.json)"
-            gh release download "$tag" --pattern "$artifact" --dir "$existing" --clobber
-            expected="$(jq -r --arg name "$artifact" '.artifacts[] | select(.name == $name) | .sha256' release-bundle/provenance.json)"
-            actual="$(sha256sum "$existing/$artifact" | awk '{print $1}')"
-            test "$expected" = "$actual"
-            exit 0
+            cmp -- release-bundle/"$jar_name" "$existing/$jar_name"
+          else
+            gh release create "$RELEASE_TAG" --verify-tag --generate-notes "release-bundle/$jar_name" release-bundle/SHA256SUMS release-bundle/provenance.json
           fi
-          gh release create "$tag" --verify-tag --generate-notes release-bundle/svg2vd-*-all.jar release-bundle/SHA256SUMS release-bundle/provenance.json
