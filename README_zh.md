@@ -59,6 +59,17 @@ java -jar cli/build/libs/svg2vd-0.1.0-all.jar \
 
 `--overwrite` 可覆盖已有输出。`convert` 还支持重复传入 `--input`，以及 `--width-dp`、`--height-dp`、`--add-aosp-header`。执行 `java -jar cli/build/libs/svg2vd-0.1.0-all.jar <command> --help` 会得到 JSON 格式的用法说明。
 
+## Agent Skill
+
+本仓库在 `.github/skills/svg2vd-cli` 提供可移植的 `svg2vd-cli` Agent Skill，帮助 AI coding agent 调用 CLI、解析 JSON 合同并安全处理输出路径。普通转换不会访问 GitHub，也不会自动升级；只有用户明确要求升级时才会下载 Release。
+
+使用 GitHub CLI 2.90.0 或更高版本可以先预览再安装：
+
+```bash
+gh skill preview RavenLiao/Android-svg-to-vector-drawable svg2vd-cli
+gh skill install RavenLiao/Android-svg-to-vector-drawable svg2vd-cli
+```
+
 ## 机器调用契约
 
 每份结果都包含 `schema_version`、`command`、`outcome`、逐文件结果和诊断信息。退出码是稳定契约：

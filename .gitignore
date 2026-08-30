@@ -9,3 +9,4 @@ work/
 out/
 .DS_Store
 .cache/
+__pycache__/
