@@ -2,20 +2,141 @@
 
 Other Language: [中文](README_zh.md)
 
-`svg2vd` is a JSON-first command-line tool for converting SVG assets to Android VectorDrawable XML and rendering SVG or VectorDrawable XML to PNG. It rebuilds the Android Studio conversion engine from a fixed upstream source candidate, so every build is traceable to an immutable Android Studio tag, commit, source identity, and dependency closure.
+## What It Does
 
-It is intended for automated Android resource import. An editor, CI job, or AI agent runs one command, reads one JSON document, and determines the outcome from a stable exit code.
+`svg2vd` converts SVG assets to Android VectorDrawable XML and renders SVG or VectorDrawable XML to PNG.
 
-## Requirements
+It is designed for:
 
-- JDK 17 or newer to run Gradle builds.
-- Java 11 to run the produced fat JAR.
+- Android resource conversion
+- Batch and recursive asset processing
+- Headless CI and editor integrations
+- AI coding agents that need a stable JSON result
 
-The JAR targets Java 11 and does not require Android Studio at runtime. Gradle requires JDK 17 or newer, while the separate Java 11 runtime used by the visual gate verifies the minimum supported JAR runtime.
+The published fat JAR includes the conversion engine and does not require Android Studio at runtime.
 
-## Build
+## Agent Skill
 
-`corpus.lock.json` identifies the accepted Android Studio source commit. Create an external immutable candidate from that lock, then build the JAR:
+This repository includes the portable `svg2vd-cli` Agent Skill at `.github/skills/svg2vd-cli`. It teaches compatible AI agents how to select the CLI command, preserve safe file handling, parse JSON results, and report failures.
+
+When a usable local JAR exists, ordinary use of the Skill does not contact GitHub or check for updates. If the requested conversion has no local JAR, the Skill can download the latest verified Release on demand; explicit version requests are also supported.
+
+With GitHub CLI 2.90.0 or newer, preview the Skill before installing it:
+
+```bash
+gh skill preview RavenLiao/Android-svg-to-vector-drawable svg2vd-cli
+gh skill install RavenLiao/Android-svg-to-vector-drawable svg2vd-cli
+```
+
+To update installed Skills:
+
+```bash
+gh skill update
+```
+
+The Skill is compatible with GitHub Copilot, Codex, Claude Code, and VS Code Agent Mode. Always preview a Skill before installation; its scripts run in the local agent environment.
+
+## Quick Start
+
+Download a JAR from the [latest Release](https://github.com/RavenLiao/Android-svg-to-vector-drawable/releases/latest), then use Java 11 or newer.
+
+Convert one SVG:
+
+```bash
+java -jar svg2vd-0.1.0-studio-2026.1.2-all.jar \
+  convert --input assets/icon.svg --output app/src/main/res/drawable
+```
+
+Render an SVG or VectorDrawable XML to PNG:
+
+```bash
+java -jar svg2vd-0.1.0-studio-2026.1.2-all.jar \
+  render --input app/src/main/res/drawable/icon.xml --output build/icon.png --size 64
+```
+
+On Windows PowerShell, use the same command with PowerShell line continuation:
+
+```powershell
+java -jar .\svg2vd-0.1.0-studio-2026.1.2-all.jar `
+  convert --input .\assets\icon.svg `
+  --output .\app\src\main\res\drawable
+```
+
+Ask an AI agent:
+
+```text
+Use svg2vd to recursively convert assets/icons to app/src/main/res/drawable.
+Do not overwrite existing files, and report failed inputs after the run.
+```
+
+## Common Commands
+
+Convert a directory recursively:
+
+```bash
+java -jar <svg2vd.jar> convert \
+  --input assets/icons --output app/src/main/res/drawable --recursive
+```
+
+Useful `convert` options:
+
+- `--overwrite`: replace existing outputs; use only when intended
+- `--width-dp <n>` and `--height-dp <n>`: request dimensions
+- `--add-aosp-header`: prepend the AOSP license header
+- Repeat `--input` to process multiple paths
+
+Use `java -jar <svg2vd.jar> <command> --help` for JSON-formatted usage help.
+
+## Output Contract
+
+Each normal invocation writes one JSON document to stdout. Stderr is reserved for diagnostics.
+
+| Exit code | Meaning |
+| --- | --- |
+| `0` | All requested work succeeded |
+| `2` | Invalid CLI usage |
+| `3` | One or more requested files failed |
+| `4` | Required environment is unavailable |
+| `5` | Unexpected internal error |
+
+The JSON result includes `schema_version`, `command`, `outcome`, per-file results, and diagnostics. Batch operations retain successful outputs and return `3` if any requested file fails.
+
+Minimal successful result:
+
+```json
+{"command":"convert","outcome":"success","summary":{"total":1,"succeeded":1,"failed":0}}
+```
+
+## Versions And Artifacts
+
+Tool and upstream versions are separate:
+
+```text
+Tool version:     0.1.0
+Android Studio:   studio-2026.1.2
+Release JAR:      svg2vd-0.1.0-studio-2026.1.2-all.jar
+```
+
+A Release contains:
+
+- The fat JAR
+- `SHA256SUMS`
+- `provenance.json`
+
+Use `SHA256SUMS` to verify a downloaded JAR. Provenance records the upstream tag, commit, engine fingerprint, and corpus lock identity.
+
+## Troubleshooting
+
+- **JAR not found:** for a requested conversion, the Agent Skill can download the latest verified Release on demand; otherwise provide a local JAR.
+- **Java error:** the JAR requires Java 11 or newer. JDK 17+ is required only to build this repository.
+- **Existing output:** add `--overwrite` only when replacement is intended.
+- **Partial failure:** inspect the JSON diagnostics; successful files remain available.
+- **Unsafe symlink:** do not bypass the CLI's path-safety checks.
+- **Offline upgrade:** use an exact verified cached Release only if an older version is acceptable.
+
+## Build From Source
+
+Building from source requires JDK 17 or newer. The produced JAR targets Java 11.
 
 ```bash
 CANDIDATE_DIR="$(mktemp -d)"
@@ -30,64 +151,14 @@ CANDIDATE_MANIFEST="$(find "$CANDIDATE_DIR" -maxdepth 1 -type f -name '*.json' -
   --dependency-verification strict
 ```
 
-The executable is `cli/build/libs/svg2vd-0.1.0-all.jar`. The Gradle project version is configured by `svg2vdVersion` in `gradle.properties` and can be overridden with `-Psvg2vdVersion=<version>` for a release build.
+The default project version is `svg2vdVersion=0.1.0` in `gradle.properties`. Override it with `-Psvg2vdVersion=<version>`.
 
-## Usage
+## Upstream And Release Maintenance
 
-Every normal invocation writes exactly one JSON document followed by a final newline to stdout. Stderr is empty. This contract is designed for unattended callers.
+`corpus.lock.json` pins the exact Android Studio source candidate used by the engine and visual corpus. The daily `Upstream Update Check` workflow checks for the newest accepted stable tag, increments the tool patch version, and opens an update PR. After the PR or a manual version bump reaches `main`, the `Release` workflow waits for the matching CI success, creates `vX.Y.Z`, and publishes the artifacts.
 
-Convert one SVG into an Android resource directory:
+See [docs/upstream-visual-corpus.md](docs/upstream-visual-corpus.md) and [docs/automated-upstream-release-plan.md](docs/automated-upstream-release-plan.md) for maintainer details.
 
-```bash
-java -jar cli/build/libs/svg2vd-0.1.0-all.jar \
-  convert --input assets/icon.svg --output app/src/main/res/drawable
-```
+## License
 
-Convert an asset tree:
-
-```bash
-java -jar cli/build/libs/svg2vd-0.1.0-all.jar \
-  convert --input assets/icons --output app/src/main/res/drawable --recursive
-```
-
-Render an SVG or VectorDrawable XML file to a PNG preview:
-
-```bash
-java -jar cli/build/libs/svg2vd-0.1.0-all.jar \
-  render --input app/src/main/res/drawable/icon.xml --output build/icon.png --size 64
-```
-
-Use `--overwrite` to replace an existing output. `convert` also accepts repeated `--input`, `--width-dp`, `--height-dp`, and `--add-aosp-header`. Use `java -jar cli/build/libs/svg2vd-0.1.0-all.jar <command> --help` to obtain a JSON usage response.
-
-## Agent Skill
-
-This repository includes the portable `svg2vd-cli` Agent Skill under `.github/skills/svg2vd-cli`. It teaches AI coding agents to run the CLI, parse its JSON contract, and handle safe output paths. It does not contact GitHub or upgrade the tool during ordinary conversions; downloading a Release is performed only after an explicit upgrade request.
-
-With GitHub CLI 2.90.0 or newer, preview and install it with:
-
-```bash
-gh skill preview RavenLiao/Android-svg-to-vector-drawable svg2vd-cli
-gh skill install RavenLiao/Android-svg-to-vector-drawable svg2vd-cli
-```
-
-## Machine Contract
-
-Each result includes `schema_version`, `command`, `outcome`, per-file results, and diagnostics. Exit codes are stable:
-
-| Exit code | Meaning |
-| --- | --- |
-| `0` | Success |
-| `2` | Invalid CLI usage |
-| `3` | One or more requested files failed |
-| `4` | Required environment is unavailable |
-| `5` | Unexpected internal error |
-
-Batch conversion preserves outputs already produced for successful inputs, reports every file in JSON, and returns `3` when any requested input fails.
-
-## Upstream And CI Verification
-
-The visual corpus is test data, separate from the production engine scope. `corpus.lock.json` pins Android Studio `studio-2026.1.2`; the materialized corpus contains 470 static assets and 231 renderable SVG/XML-to-PNG cases. The synchronizer reads a fixed Git tree and a fixed directory archive, then verifies every extracted file's Git blob ID and SHA-256 before use.
-
-GitHub Actions builds with JDK 17 and invokes the release JAR with a separate Java 11 executable for compatibility verification. Linux runs the full visual corpus; macOS and Windows run the committed minimal corpus contract. The image comparator, corpus runner, and audit artifacts are test-only and are not packaged in the fat JAR. CI is headless and never opens a graphical window.
-
-For maintenance and lock refresh, see [docs/upstream-visual-corpus.md](docs/upstream-visual-corpus.md). The `Upstream Update Check` workflow checks for newer accepted stable Android Studio tags daily, increments the tool patch version, and opens an update PR after regenerating `corpus.lock.json`. Once the PR or a manual version bump reaches `main`, the `Release` workflow waits for the matching successful CI run, creates the immutable `vX.Y.Z` tag, and publishes the JAR, `SHA256SUMS`, and `provenance.json`. The release version is independent from the Android Studio version, which is recorded in the artifact name and provenance.
+The project and included Skill are licensed under Apache-2.0.

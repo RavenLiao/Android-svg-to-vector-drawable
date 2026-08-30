@@ -21,7 +21,7 @@ from typing import Any, Dict, List, Optional
 
 DEFAULT_REPOSITORY = "RavenLiao/Android-svg-to-vector-drawable"
 TAG_RE = re.compile(r"^v([0-9]+\.[0-9]+\.[0-9]+)$")
-JAR_RE = re.compile(r"^svg2vd-([0-9]+\.[0-9]+\.[0-9]+)-studio-([0-9]+\.[0-9]+\.[0-9]+(?:-patch0*[1-9][0-9]*)?)-all\.jar$")
+JAR_RE = re.compile(r"^svg2vd-([0-9]+\.[0-9]+\.[0-9]+)-.+-all\.jar$")
 
 
 class ReleaseError(RuntimeError):
@@ -170,12 +170,12 @@ def resolve(repository: str, version: str, cache: Path, refresh: bool) -> Dict[s
     if len(jars) != 1:
         raise ReleaseError(f"expected exactly one svg2vd release JAR, found {jars}")
     jar_name = jars[0]
-    for required in ("SHA256SUMS", "provenance.json"):
+    for required in ("SHA256SUMS",):
         if required not in by_name:
             raise ReleaseError(f"release is missing {required}")
     destination = cache / tag
     destination.mkdir(parents=True, exist_ok=True)
-    for name in (jar_name, "SHA256SUMS", "provenance.json"):
+    for name in (jar_name, "SHA256SUMS"):
         url = by_name[name].get("browser_download_url")
         if not isinstance(url, str):
             raise ReleaseError(f"asset {name} has no download URL")
@@ -191,29 +191,15 @@ def resolve(repository: str, version: str, cache: Path, refresh: bool) -> Dict[s
     tag_version = TAG_RE.fullmatch(tag).group(1)
     if match.group(1) != tag_version:
         raise ReleaseError(f"JAR tool version {match.group(1)} does not match release tag {tag}")
-    warnings: List[str] = []
-    provenance_path = destination / "provenance.json"
-    provenance: Dict[str, Any] = {}
-    try:
-        parsed = json.loads(provenance_path.read_text(encoding="utf-8"))
-        if isinstance(parsed, dict):
-            provenance = parsed
-        else:
-            warnings.append("provenance.json is not an object")
-    except (OSError, json.JSONDecodeError) as error:
-        warnings.append(f"provenance.json could not be parsed: {error}")
-    if provenance.get("tool_version") not in (None, match.group(1)):
-        warnings.append("provenance tool_version does not match the JAR name")
     result = {
         "repository": repository,
         "tag": tag,
         "tool_version": match.group(1),
-        "upstream_tag": provenance.get("upstream_tag"),
         "jar": str(jar.resolve()),
         "jar_sha256": jar_sha,
         "cache_dir": str(destination.resolve()),
         "cached": False,
-        "warnings": warnings,
+        "warnings": [],
     }
     (destination / "release.json").write_text(json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return result

@@ -2,11 +2,11 @@
 
 ## Java
 
-The Release JAR targets Java 11. Check `java -version`; use the `SVG2VD_JAVA` path or an explicit Java executable when multiple JDKs are installed. Gradle's JDK 17 requirement applies only to building this repository.
+The Release JAR requires Java 11 or newer. Check `java -version`; use the `SVG2VD_JAVA` path or an explicit Java executable when multiple JDKs are installed.
 
 ## Missing JAR
 
-Do not download automatically. Ask the user whether to use a local build or explicitly download a Release with `scripts/resolve_release.py`.
+If a requested conversion has no usable local JAR, resolve the latest published Release with `scripts/resolve_release.py`. This is on-demand recovery; do not poll for updates in the background.
 
 ## Exit Code 3
 

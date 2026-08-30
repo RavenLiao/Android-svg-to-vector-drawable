@@ -6,7 +6,7 @@ license: Apache-2.0
 
 # svg2vd CLI
 
-Use the published svg2vd fat JAR for conversion and rendering. This skill is for operating the CLI, not changing the svg2vd source, CI, upstream corpus, or release workflows.
+Use the published svg2vd fat JAR for conversion and rendering.
 
 ## Default Behavior
 
@@ -17,20 +17,20 @@ Do not contact GitHub or download files for an ordinary conversion. Resolve the 
 3. A local `cli/build/libs/svg2vd-*-all.jar` in the current project.
 4. A previously downloaded cache entry selected by the user.
 
-If no local JAR is available, report that it is missing and ask whether the user wants a release downloaded. Do not silently upgrade or download Gradle.
+If no local JAR is available for a requested conversion, resolve the latest published Release with `scripts/resolve_release.py` and use its verified JAR. This is on-demand availability recovery, not background update checking.
 
 ## Explicit Upgrade
 
-Only when the user explicitly asks to upgrade, download, or use a release version:
+When the user explicitly asks to upgrade, download, or use a release version, or when a requested conversion has no usable local JAR:
 
 1. Run `scripts/resolve_release.py` with `--version latest` or an explicit `vX.Y.Z`.
 2. The resolver downloads into the platform cache, reuses an exact cached tag, and prints JSON metadata.
 3. Use the returned `jar` path. Never execute a partially downloaded file.
-4. Report both `tool_version` and `upstream_tag` when available.
+4. Report the selected release tag and tool version when available.
 
 The bundled resolver uses only the Python standard library and supports Python 3.8 or newer. Ordinary use with an already available JAR does not require Python.
 
-A normal release contains a fat JAR and needs Java 11 or newer at runtime. Gradle, Android Studio source, and build dependencies are not runtime dependencies.
+A normal release contains a fat JAR and needs Java 11 or newer at runtime.
 
 ## Running
 
@@ -77,9 +77,7 @@ Do not bypass `unsafe_symlink` or other path-safety diagnostics. The CLI rejects
 ## Runtime And Artifact Rules
 
 - Require Java 11 or newer; use `SVG2VD_JAVA` when the executable is not on PATH.
-- Do not assume the tool version equals the Android Studio version.
-- A release JAR normally looks like `svg2vd-X.Y.Z-studio-A.B.C-all.jar`.
-- Verify a newly downloaded JAR before executing it. `SHA256SUMS` is the required integrity check; provenance is used for displayed build identity and optional diagnostics.
+- Verify a newly downloaded JAR before executing it. `SHA256SUMS` is the required integrity check.
 - If the network is unavailable, use an exact verified cache entry only when the user accepts the cached version. Otherwise stop and report the error.
 
 ## References
