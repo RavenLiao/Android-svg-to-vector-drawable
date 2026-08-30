@@ -16,7 +16,7 @@ val verifyBuildJdk = tasks.register("verifyBuildJdk") {
 
 allprojects {
     group = "io.github.ravenliao"
-    version = "0.1.0"
+    version = providers.gradleProperty("svg2vdVersion").orElse("0.1.0").get()
 }
 
 subprojects {

@@ -30,7 +30,7 @@ CANDIDATE_MANIFEST="$(find "$CANDIDATE_DIR" -maxdepth 1 -type f -name '*.json' -
   --dependency-verification strict
 ```
 
-可执行文件为 `cli/build/libs/svg2vd-0.1.0-all.jar`。
+可执行文件为 `cli/build/libs/svg2vd-0.1.0-all.jar`。Gradle 项目版本由 `gradle.properties` 中的 `svg2vdVersion` 配置，发布构建时可用 `-Psvg2vdVersion=<版本>` 覆盖。
 
 ## 使用方式
 
@@ -79,4 +79,4 @@ java -jar cli/build/libs/svg2vd-0.1.0-all.jar \
 
 GitHub Actions 使用 JDK 17 构建，并以独立的 Java 11 可执行程序验证产物兼容性。Linux 运行完整视觉语料；macOS 和 Windows 运行仓库内提交的最小语料契约。图像比较器、语料运行器和审计产物均只属于测试，不会被打进 fat JAR。CI 始终以 headless 模式运行，不会打开图形窗口。
 
-维护与更新 lock 的流程见 [docs/upstream-visual-corpus.md](docs/upstream-visual-corpus.md)。本仓库目前没有会发布 Release 的工作流。
+维护与更新 lock 的流程见 [docs/upstream-visual-corpus.md](docs/upstream-visual-corpus.md)。`Upstream Update Check` 每天检查新的 Android Studio 稳定 Tag，重新生成 `corpus.lock.json` 并创建更新 PR。向通过 CI 的提交推送 `v0.1.0` 形式的 Git tag 后，发布 workflow 会构建并发布 JAR、`SHA256SUMS` 和 `provenance.json`。工具版本与 Android Studio 版本独立，后者会记录在产物名称和 provenance 中。

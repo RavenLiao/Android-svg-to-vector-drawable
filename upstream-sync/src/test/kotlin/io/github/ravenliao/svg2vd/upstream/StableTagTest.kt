@@ -129,6 +129,23 @@ class StableTagTest {
         }
     }
 
+    @Test
+    fun `tool release tag may point to an explicit upstream tag in provenance`() {
+        val bytes = "release bytes".toByteArray()
+        val sha = sha256Hex(bytes)
+        val release = ObservedRelease(
+            tag = "v0.1.0",
+            assets = listOf(ObservedAsset("svg2vd.jar", bytes)),
+            provenanceBytes = "{\"artifacts\":[{\"name\":\"svg2vd.jar\",\"sha256\":\"$sha\"}],\"engine_fingerprint\":\"fp\",\"tool_source_commit\":\"tool\",\"upstream_tag\":\"studio-2026.1.2\"}".toByteArray(),
+            verification = ReleaseVerification.VALID,
+        )
+
+        assertEquals(
+            VerifiedAnchor("studio-2026.1.2", "fp"),
+            deriveVerifiedAnchor(RemoteReleaseState(listOf(release), mapOf("v0.1.0" to GitTagTarget("tool", null)))),
+        )
+    }
+
     private fun fixture(name: String) = javaClass.classLoader.getResourceAsStream(name)!!.readBytes().toString(StandardCharsets.UTF_8)
 
     private fun refs(vararg tags: Pair<String, GitilesRef>) = GitilesRefs(tags.associate { "refs/tags/${it.first}" to it.second })

@@ -30,7 +30,7 @@ CANDIDATE_MANIFEST="$(find "$CANDIDATE_DIR" -maxdepth 1 -type f -name '*.json' -
   --dependency-verification strict
 ```
 
-The executable is `cli/build/libs/svg2vd-0.1.0-all.jar`.
+The executable is `cli/build/libs/svg2vd-0.1.0-all.jar`. The Gradle project version is configured by `svg2vdVersion` in `gradle.properties` and can be overridden with `-Psvg2vdVersion=<version>` for a release build.
 
 ## Usage
 
@@ -79,4 +79,4 @@ The visual corpus is test data, separate from the production engine scope. `corp
 
 GitHub Actions builds with JDK 17 and invokes the release JAR with a separate Java 11 executable for compatibility verification. Linux runs the full visual corpus; macOS and Windows run the committed minimal corpus contract. The image comparator, corpus runner, and audit artifacts are test-only and are not packaged in the fat JAR. CI is headless and never opens a graphical window.
 
-For maintenance and lock refresh, see [docs/upstream-visual-corpus.md](docs/upstream-visual-corpus.md). No workflow in this repository publishes a release.
+For maintenance and lock refresh, see [docs/upstream-visual-corpus.md](docs/upstream-visual-corpus.md). The `Upstream Update Check` workflow checks for newer accepted stable Android Studio tags daily and opens an update PR after regenerating `corpus.lock.json`. A Git tag such as `v0.1.0` triggers the release workflow after verifying that CI passed for the tagged commit; the release contains the JAR, `SHA256SUMS`, and `provenance.json`. The release version is independent from the Android Studio version, which is recorded in the artifact name and provenance.

@@ -26,13 +26,17 @@ data class GitTagTarget(val objectId: String, val peeledCommit: String?)
 data class RemoteReleaseState(val releases: List<ObservedRelease>, val gitTags: Map<String, GitTagTarget>)
 class RemoteStateException(message: String) : IllegalStateException(message)
 
+private val releaseMetadataAssets = setOf("SHA256SUMS", "provenance.json")
+
 fun deriveVerifiedAnchor(remote: RemoteReleaseState): VerifiedAnchor? {
-    val releasedTags = remote.releases.map(ObservedRelease::tag).toSet()
+    val verified = remote.releases.map { release -> release to verifiedProvenance(release) }
+    val releasedTags = verified.flatMap { (release, provenance) ->
+        listOfNotNull(release.tag, provenance.upstreamTag)
+    }.toSet()
     val orphan = remote.gitTags.keys - releasedTags
     if (orphan.isNotEmpty()) throw RemoteStateException("orphan git tag(s): ${orphan.sorted().joinToString()}")
     if (remote.releases.isEmpty()) return null
-    val complete = remote.releases.map { release ->
-        val provenance = verifiedProvenance(release)
+    val complete = verified.map { (release, provenance) ->
         if (provenance.engineFingerprint.isBlank() || provenance.toolSourceCommit.isBlank()) {
             throw RemoteStateException("release ${release.tag} is missing complete assets or provenance")
         }
@@ -41,14 +45,20 @@ fun deriveVerifiedAnchor(remote: RemoteReleaseState): VerifiedAnchor? {
         if (commit != provenance.toolSourceCommit) throw RemoteStateException("git tag ${release.tag} does not target tool_source_commit")
         release to provenance
     }
-    return complete.maxByOrNull { stableReleaseVersion(it.first.tag) }?.let { VerifiedAnchor(it.first.tag, it.second.engineFingerprint) }
+    return complete.maxByOrNull { stableReleaseVersion(it.second.upstreamTag ?: it.first.tag) }?.let {
+        VerifiedAnchor(it.second.upstreamTag ?: it.first.tag, it.second.engineFingerprint)
+    }
 }
 
 private fun stableReleaseVersion(tag: String): StableVersion =
     (classifyTag(tag, GitilesRef("release-tag")) as? TagClassification.AcceptedStable)?.version
         ?: throw RemoteStateException("release $tag is not an accepted stable tag")
 
-private data class VerifiedReleaseProvenance(val engineFingerprint: String, val toolSourceCommit: String)
+private data class VerifiedReleaseProvenance(
+    val engineFingerprint: String,
+    val toolSourceCommit: String,
+    val upstreamTag: String?,
+)
 
 private fun verifiedProvenance(release: ObservedRelease): VerifiedReleaseProvenance {
     if (release.verification != ReleaseVerification.VALID) throw RemoteStateException("release ${release.tag} failed verification")
@@ -66,7 +76,10 @@ private fun verifiedProvenance(release: ObservedRelease): VerifiedReleaseProvena
     } catch (error: Exception) {
         throw RemoteStateException("release ${release.tag} provenance has invalid assets: ${error.message}")
     }
-    val actualAssets = release.assets.map { asset -> asset.name to sha256Hex(asset.bytes) }.sortedBy { it.first }
+    val actualAssets = release.assets
+        .filterNot { it.name in releaseMetadataAssets }
+        .map { asset -> asset.name to sha256Hex(asset.bytes) }
+        .sortedBy { it.first }
     if (expectedAssetHashes.isEmpty() || expectedAssetHashes != actualAssets || actualAssets.map { it.first }.distinct().size != actualAssets.size) {
         throw RemoteStateException("release ${release.tag} assets do not match provenance")
     }
@@ -74,6 +87,7 @@ private fun verifiedProvenance(release: ObservedRelease): VerifiedReleaseProvena
         VerifiedReleaseProvenance(
             root.getValue("engine_fingerprint").jsonPrimitive.content,
             root.getValue("tool_source_commit").jsonPrimitive.content,
+            root["upstream_tag"]?.jsonPrimitive?.content,
         )
     } catch (error: Exception) {
         throw RemoteStateException("release ${release.tag} provenance is incomplete: ${error.message}")

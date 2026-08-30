@@ -23,6 +23,7 @@ tasks.test { useJUnitPlatform() }
 val candidateManifest = providers.gradleProperty("candidateManifest")
 val candidateOutputDirectory = providers.gradleProperty("candidateOutputDirectory")
 val candidateTag = providers.gradleProperty("candidateTag")
+val latestTagOutput = providers.gradleProperty("latestTagOutput")
 val corpusLock = providers.gradleProperty("corpusLock")
 val corpusOutputDirectory = providers.gradleProperty("corpusOutputDirectory")
 val corpusManifestInput = providers.gradleProperty("corpusManifest")
@@ -145,6 +146,20 @@ tasks.register<JavaExec>("discoverCandidate") {
         val tag = candidateTag.orNull ?: error("-PcandidateTag=<studio tag> is required")
         val (runtime, locks) = currentBuildInputDigests()
         args("discover", workspaceRoot.toString(), tag, output, "$runtime:$locks")
+    }
+}
+
+tasks.register<JavaExec>("discoverLatestStableTag") {
+    group = "upstream"
+    description = "Writes the newest accepted stable Android Studio tag after the canonical corpus lock anchor."
+    classpath = sourceSets.main.get().runtimeClasspath
+    mainClass.set("io.github.ravenliao.svg2vd.upstream.LatestStableTagMain")
+    inputs.file(corpusLock).withPathSensitivity(PathSensitivity.NONE)
+    outputs.file(latestTagOutput.map(::file))
+    doFirst {
+        val lock = corpusLock.orNull ?: error("-PcorpusLock=<canonical corpus lock> is required")
+        val output = latestTagOutput.orNull ?: error("-PlatestTagOutput=<external output file> is required")
+        args(lock, output)
     }
 }
 

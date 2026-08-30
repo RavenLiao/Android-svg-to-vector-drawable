@@ -1,0 +1,119 @@
+name: Upstream Update Check
+
+on:
+  schedule:
+    - cron: '17 3 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: upstream-update
+  cancel-in-progress: false
+
+jobs:
+  discover:
+    name: Discover and validate newest stable upstream tag
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      update: ${{ steps.result.outputs.update }}
+      tag: ${{ steps.result.outputs.tag }}
+      artifact: ${{ steps.result.outputs.artifact }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - id: build-java
+        uses: actions/setup-java@dded0888837ed1f317902acf8a20df0ad188d165
+        with:
+          distribution: microsoft
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@346a44564f803579f2a9d82d6570fa5c56d80eff
+      - id: result
+        env:
+          UPDATE_ROOT: ${{ runner.temp }}/svg2vd-upstream-update
+        shell: bash
+        run: |
+          mkdir -p "$UPDATE_ROOT"
+          JAVA_HOME="${{ steps.build-java.outputs.path }}" ./gradlew :upstream-sync:discoverLatestStableTag \
+            -PcorpusLock="$GITHUB_WORKSPACE/corpus.lock.json" \
+            -PlatestTagOutput="$UPDATE_ROOT/latest-tag.txt" \
+            --dependency-verification strict
+          tag="$(tr -d '\r\n' < "$UPDATE_ROOT/latest-tag.txt")"
+          if [ "$tag" = NO_UPDATE ]; then
+            echo 'update=false' >> "$GITHUB_OUTPUT"
+            echo 'tag=' >> "$GITHUB_OUTPUT"
+            echo 'artifact=' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          candidate="$UPDATE_ROOT/candidate"
+          corpus="$UPDATE_ROOT/corpus"
+          lock_output="$UPDATE_ROOT/new-corpus.lock.json"
+          JAVA_HOME="${{ steps.build-java.outputs.path }}" ./gradlew :upstream-sync:discoverCandidate \
+            -PcandidateTag="$tag" -PcandidateOutputDirectory="$candidate" --dependency-verification strict
+          manifest="$(find "$candidate" -maxdepth 1 -type f -name '*.json' -print -quit)"
+          test -n "$manifest"
+          JAVA_HOME="${{ steps.build-java.outputs.path }}" ./gradlew :upstream-sync:syncCorpus \
+            -PcandidateManifest="$manifest" -PcorpusOutputDirectory="$corpus" --dependency-verification strict
+          corpus_manifest="$(find "$corpus" -name manifest.json -print -quit)"
+          test -n "$corpus_manifest"
+          JAVA_HOME="${{ steps.build-java.outputs.path }}" ./gradlew :upstream-sync:writeCorpusLock \
+            -PcorpusManifest="$corpus_manifest" -PcorpusLockOutput="$lock_output" --dependency-verification strict
+          test -f "$lock_output"
+          cp "$lock_output" "$UPDATE_ROOT/corpus.lock.json"
+          cmp -- "$GITHUB_WORKSPACE/corpus.lock.json" "$UPDATE_ROOT/corpus.lock.json" && {
+            echo 'update=false' >> "$GITHUB_OUTPUT"
+            echo 'tag=' >> "$GITHUB_OUTPUT"
+            echo 'artifact=' >> "$GITHUB_OUTPUT"
+            exit 0
+          }
+          artifact="upstream-lock-$tag"
+          echo 'update=true' >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "artifact=$artifact" >> "$GITHUB_OUTPUT"
+          mkdir -p "$UPDATE_ROOT/artifact"
+          cp "$UPDATE_ROOT/corpus.lock.json" "$UPDATE_ROOT/artifact/corpus.lock.json"
+      - if: steps.result.outputs.update == 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: ${{ steps.result.outputs.artifact }}
+          path: ${{ runner.temp }}/svg2vd-upstream-update/artifact/corpus.lock.json
+          if-no-files-found: error
+
+  propose:
+    name: Propose the upstream lock update
+    needs: discover
+    if: needs.discover.outputs.update == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      actions: write
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: main
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: ${{ needs.discover.outputs.artifact }}
+          path: ${{ runner.temp }}/upstream-lock
+      - name: Commit and open or update the upstream PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+          UPSTREAM_TAG: ${{ needs.discover.outputs.tag }}
+        shell: bash
+        run: |
+          branch="automation/upstream-$UPSTREAM_TAG"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git fetch origin "$branch" || true
+          git checkout -B "$branch" origin/main
+          cp "$RUNNER_TEMP/upstream-lock/corpus.lock.json" corpus.lock.json
+          git add corpus.lock.json
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -m "Update Android Studio corpus to $UPSTREAM_TAG"
+          git push --force-with-lease origin "$branch"
+          gh workflow run ci.yml --ref "$branch"
+          if ! gh pr list --head "$branch" --state open --json number --jq '.[0].number' | grep -q .; then
+            gh pr create --base main --head "$branch" \
+              --title "Update Android Studio corpus to $UPSTREAM_TAG" \
+              --body "Automated upstream update for $UPSTREAM_TAG. CI must pass before merge."
+          fi

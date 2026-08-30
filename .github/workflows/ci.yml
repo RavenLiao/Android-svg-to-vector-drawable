@@ -2,6 +2,7 @@ name: CI
 
 on:
   pull_request:
+  workflow_dispatch:
   push:
     branches: [main]
 
@@ -154,6 +155,7 @@ jobs:
           name: ${{ matrix.name }}-artifacts
           path: |
             verification/build/corpus-artifacts
+            cli/build/libs/*.jar
             ${{ runner.temp }}/svg2vd-locked-candidate
             ${{ runner.temp }}/svg2vd-locked-corpus
           if-no-files-found: ignore
